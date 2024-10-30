@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Procesador de Videos</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .upload-area {
+            border: 2px dashed #cbd5e1;
+            transition: all 0.3s ease;
+        }
+        .upload-area.dragover {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        .upload-area.processing {
+            border-color: #9ca3af;
+            background-color: #f3f4f6;
+            opacity: 0.7;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-center mb-8">Pig video detector</h1>
+        
+        <!-- Área de carga -->
+        <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6 mb-8">
+            <div id="upload-area" 
+                 class="upload-area rounded-lg p-8 text-center cursor-pointer">
+                <div class="mb-4">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                        <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </div>
+                <p id="upload-text" class="text-gray-600">Arrastra tu video aquí o</p>
+                <input type="file" id="file-input" accept="video/*" class="hidden">
+                <button id="upload-button" onclick="document.getElementById('file-input').click()" 
+                        class="mt-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                    Selecciona un archivo
+                </button>
+            </div>
+            
+            <!-- Barra de progreso -->
+            <div id="progress-area" class="hidden mt-4">
+                <div class="relative pt-1">
+                    <div class="flex mb-2 items-center justify-between">
+                        <div>
+                            <span id="progress-percentage" class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-blue-600 bg-blue-200">
+                                0%
+                            </span>
+                        </div>
+                        <div class="text-right">
+                            <span id="progress-status" class="text-xs font-semibold inline-block text-blue-600">
+                                Procesando video...
+                            </span>
+                        </div>
+                    </div>
+                    <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-blue-200">
+                        <div id="progress-bar" 
+                             class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500 transition-all duration-300" 
+                             style="width: 0%">
+                        </div>
+                    </div>
+                </div>
+                <p id="progress-text" class="text-sm text-gray-600 mt-2 text-center">
+                    Procesando video...
+                </p>
+            </div>
+            
+            <!-- Área de descarga -->
+            <div id="download-area" class="hidden mt-4 text-center">
+                <a id="download-link" 
+                   class="inline-block px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition"
+                   download>
+                    Descargar Video Procesado
+                </a>
+            </div>
+
+            <!-- Área de error -->
+            <div id="error-area" class="hidden mt-4">
+                <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+                    <span id="error-message" class="block sm:inline"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('upload-area');
+        const uploadText = document.getElementById('upload-text');
+        const uploadButton = document.getElementById('upload-button');
+        const fileInput = document.getElementById('file-input');
+        const progressArea = document.getElementById('progress-area');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        const progressPercentage = document.getElementById('progress-percentage');
+        const progressStatus = document.getElementById('progress-status');
+        const downloadArea = document.getElementById('download-area');
+        const downloadLink = document.getElementById('download-link');
+        const errorArea = document.getElementById('error-area');
+        const errorMessage = document.getElementById('error-message');
+
+        let progressInterval;
+
+        // Eventos de drag and drop
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            if (!uploadArea.classList.contains('processing')) {
+                uploadArea.classList.add('dragover');
+            }
+        }
+
+        function unhighlight(e) {
+            uploadArea.classList.remove('dragover');
+        }
+
+        uploadArea.addEventListener('drop', handleDrop, false);
+        fileInput.addEventListener('change', handleChange, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+
+        function handleChange(e) {
+            const files = this.files;
+            handleFiles(files);
+        }
+
+        function handleFiles(files) {
+            if (files.length > 0 && !uploadArea.classList.contains('processing')) {
+                const file = files[0];
+                if (file.type.startsWith('video/')) {
+                    uploadFile(file);
+                } else {
+                    showError('Por favor, selecciona un archivo de video.');
+                }
+            }
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorArea.classList.remove('hidden');
+            setTimeout(() => {
+                errorArea.classList.add('hidden');
+            }, 5000);
+        }
+
+        function startProgressCheck() {
+            progressInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/progress');
+                    const data = await response.json();
+                    updateProgress(data.progress);
+                } catch (error) {
+                    console.error('Error checking progress:', error);
+                }
+            }, 1000);
+        }
+
+        function updateProgress(progress) {
+            const percentage = Math.min(Math.round(progress), 100);
+            progressBar.style.width = `${percentage}%`;
+            progressPercentage.textContent = `${percentage}%`;
+            
+            if (percentage === 100) {
+                progressStatus.textContent = 'Completado';
+                clearInterval(progressInterval);
+            }
+        }
+
+        async function uploadFile(file) {
+            console.log('Iniciando carga de archivo:', file.name);
+            
+            // Resetear y mostrar áreas relevantes
+            uploadArea.classList.add('processing');
+            progressArea.classList.remove('hidden');
+            downloadArea.classList.add('hidden');
+            errorArea.classList.add('hidden');
+            
+            // Resetear progreso
+            progressBar.style.width = '0%';
+            progressPercentage.textContent = '0%';
+            progressStatus.textContent = 'Procesando video...';
+            progressText.textContent = `Preparando: ${file.name}`;
+
+            const formData = new FormData();
+            formData.append('video', file);
+
+            try {
+                // Iniciar chequeo de progreso
+                startProgressCheck();
+
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    
+                    // Mostrar enlace de descarga
+                    downloadArea.classList.remove('hidden');
+                    downloadLink.href = data.processed_video;
+                    downloadLink.download = 'processed_' + file.name;
+                    
+                    // Actualizar estado
+                    progressStatus.textContent = '¡Completado!';
+                    progressText.textContent = 'Procesamiento completado exitosamente';
+                    
+                } else {
+                    throw new Error(data.error || 'Error en el servidor');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                showError(error.message);
+                progressStatus.textContent = 'Error';
+                progressBar.classList.remove('bg-blue-500');
+                progressBar.classList.add('bg-red-500');
+            } finally {
+                // Limpiar y resetear
+                clearInterval(progressInterval);
+                setTimeout(() => {
+                    uploadArea.classList.remove('processing');
+                    progressBar.classList.remove('bg-red-500');
+                    progressBar.classList.add('bg-blue-500');
+                    fileInput.value = '';
+                }, 2000);
+            }
+        }
+    </script>
+</body>
+</html>
